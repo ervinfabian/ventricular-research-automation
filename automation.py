@@ -102,12 +102,12 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         segNode, maskLabel, brainVolume
         )
 
-        outMasked = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "TheBrain" + str(counter))  ## it will be the volume of the segmented Brain
+        theBrain = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "TheBrain" + str(counter))  ## it will be the volume of the segmented Brain
 
         params = {
             "InputVolume": brainVolume.GetID(),
             "MaskVolume": maskLabel.GetID(),
-            "OutputVolume": outMasked.GetID(),
+            "OutputVolume": theBrain.GetID(),
             "FillValue": -10000,
         }
 
@@ -115,8 +115,18 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         print(cliNode.GetStatusString())
         print(cliNode.GetErrorText())
 
+        # run Segment Statistics
+        logic = SegmentStatistics.SegmentStatisticsLogic()
+        paramNode = logic.getParameterNode()
+        paramNode.SetParameter("Segmentation", segNode.GetID())
+        paramNode.SetParameter("ScalarVolume", theBrain.GetID())
+        logic.computeStatistics()
 
-        
+        stats = logic.getStatistics()
+
+        brain_volume = stats[(segId, "LabelmapSegmentStatisticsPlugin.volume_mm3")] ## the calculated brain volume
+        print(brain_volume/1000)
+
         counter = counter + 1
 
    
