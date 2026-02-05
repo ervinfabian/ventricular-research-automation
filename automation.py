@@ -13,15 +13,15 @@ patientUIDs = []
 with DICOMUtils.TemporaryDICOMDatabase() as db:
     slicer.util.selectModule("DICOM")
     dicomBrowser = slicer.modules.DICOMWidget.browserWidget.dicomBrowser
-    for i in os.listdir("/Users/ervin/Downloads/cercetare/data/"):
+    for i in os.listdir("/Users/ervin/Documents/kutatas/data/"):
         if not i.startswith('.'):
-            for k in os.listdir("/Users/ervin/Downloads/cercetare/data/" + i + "/"):
+            for k in os.listdir("/Users/ervin/Documents/kutatas/data/" + i + "/"):
                 if not k.startswith('.'):
-                    for l in os.listdir("/Users/ervin/Downloads/cercetare/data/" + i + "/" + k + "/"):
+                    for l in os.listdir("/Users/ervin/Documents/kutatas/data/" + i + "/" + k + "/"):
                         if not l.startswith('.'):
-                            if not os.path.isdir("/Users/ervin/Downloads/cercetare/data/" + i + "/" + k + "/" + l + "/"):
-                                raise ValueError("Not a folder: " + "/Users/ervin/Downloads/cercetare/data/" + i + "/" + k + "/" + l + "/")
-                            dicomBrowser.importDirectory("/Users/ervin/Downloads/cercetare/data/" + i + "/" + k + "/" + l + "/", dicomBrowser.ImportDirectoryAddLink)
+                            if not os.path.isdir("/Users/ervin/Documents/kutatas/data/" + i + "/" + k + "/" + l + "/"):
+                                raise ValueError("Not a folder: " + "/Users/ervin/Documents/kutatas/data/" + i + "/" + k + "/" + l + "/")
+                            dicomBrowser.importDirectory("/Users/ervin/Documents/kutatas/data/" + i + "/" + k + "/" + l + "/", dicomBrowser.ImportDirectoryAddLink)
                             dicomBrowser.waitForImportFinished()                       
                             print(db.patients()[-1])
 
@@ -32,33 +32,55 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
                         
     for patientUID in patientUIDs:
         loadedNodeID = DICOMUtils.loadPatientByUID(patientUID)
+        nodes = [slicer.mrmlScene.GetNodeByID(nid) for nid in loadedNodeID]
+        volumes = [n for n in nodes if n and n.IsA("vtkMRMLScalarVolumeNode")]
+        # print(volumes[0])
 
 ## creating the volume
         ctVolume = slicer.mrmlScene.GetNodeByID(str(loadedNodeID))
     #     volumeNodes = [nod for nod in nodes if nod and nod.IsA("vtkMRMLScalarVolumeNode")]
 
-## swiss skull stripper 
+## swiss skull stripper
         params = {
-        "inputVolume": ctVolume,
-        "outputVolume": slicer.mrmlScene.AddNewNodeByClass(
+        "patientVolume": volumes[0].GetID(),
+        "patientOutputVolume": slicer.mrmlScene.AddNewNodeByClass(
             "vtkMRMLScalarVolumeNode", "BrainOnly"
         ),
-        "outputMask": slicer.mrmlScene.AddNewNodeByClass(
+        "patientMaskLabel": slicer.mrmlScene.AddNewNodeByClass(
             "vtkMRMLLabelMapVolumeNode", "BrainMask"
         ),
         }
-        
-        cliNode = slicer.cli.run(
+        cliNode = slicer.cli.runSync(
         slicer.modules.swissskullstripper,
         None,
-        params,
-        wait_for_completion=True
+        params
         )
-    
-
-
 
 
 ## segmentation
-        # segNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode")
+        brainVolume = slicer.util.getNode("BrainOnly")
+        segNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "Segmentation")
+        segNode.CreateDefaultDisplayNodes()
+        segNode.SetReferenceImageGeometryParameterFromVolumeNode(brainVolume)
+
+        segmentEditorWidget = slicer.qMRMLSegmentEditorWidget()
+        segmentEditorWidget.setMRMLScene(slicer.mrmlScene)
+
+        segmentEditorNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentEditorNode")
+        segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
+
+        segmentEditorWidget.setSegmentationNode(segNode)
+        segmentEditorWidget.setMasterVolumeNode(brainVolume)
+
+        # Add a segment
+        segNode.GetSegmentation().AddEmptySegment("ThresholdSeg")
+
+        # Apply threshold
+        segmentEditorWidget.setActiveEffectByName("Threshold")
+        effect = segmentEditorWidget.activeEffect()
+
+        effect.setParameter("MinimumThreshold", "1")   # <-- choose your HU range
+        effect.setParameter("MaximumThreshold", "46")    # <-- choose your HU range
+        effect.self().onApply()
+
    
