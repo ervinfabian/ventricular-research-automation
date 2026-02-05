@@ -5,6 +5,7 @@ import vtk
 import ctk
 from DICOMLib import DICOMUtils
 import time
+import SegmentStatistics
 
 ## iteration through the file tree
 ## reading/importing of the CT scans
@@ -62,7 +63,6 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
 ## segmentation
         brainVolume = slicer.util.getNode("BrainOnly" + str(counter))
         segNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "Segmentation" + str(counter))
-        counter = counter + 1
         segNode.CreateDefaultDisplayNodes()
         segNode.SetReferenceImageGeometryParameterFromVolumeNode(brainVolume)
 
@@ -73,10 +73,11 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         segmentEditorWidget.setMRMLSegmentEditorNode(segmentEditorNode)
 
         segmentEditorWidget.setSegmentationNode(segNode)
-        segmentEditorWidget.setMasterVolumeNode(brainVolume)
+        segmentEditorWidget.setSourceVolumeNode(brainVolume)
 
         # Add a segment
-        segNode.GetSegmentation().AddEmptySegment("ThresholdSeg" + str(counter))
+        segId = segNode.GetSegmentation().AddEmptySegment("ThresholdSeg" + str(counter))
+        segmentEditorWidget.setCurrentSegmentID(segId)
 
         # Apply threshold
         segmentEditorWidget.setActiveEffectByName("Threshold")
@@ -93,5 +94,29 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         effect.setParameter("SmoothingMethod", "MORPHOLOGICAL_CLOSING")
         effect.setParameter("KernelSizeMm", "4")  # <-- 4 mm smoothing
         effect.self().onApply()
+
+        # masking outside
+        maskLabel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "MaskLabel")
+
+        slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(
+        segNode, maskLabel, brainVolume
+        )
+
+        outMasked = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "TheBrain" + str(counter))  ## it will be the volume of the segmented Brain
+
+        params = {
+            "InputVolume": brainVolume.GetID(),
+            "MaskVolume": maskLabel.GetID(),
+            "OutputVolume": outMasked.GetID(),
+            "FillValue": -10000,
+        }
+
+        cliNode = slicer.cli.runSync(slicer.modules.maskscalarvolume, None, params)
+        print(cliNode.GetStatusString())
+        print(cliNode.GetErrorText())
+
+
+        
+        counter = counter + 1
 
    
