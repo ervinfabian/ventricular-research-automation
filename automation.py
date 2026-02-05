@@ -9,6 +9,8 @@ import time
 ## iteration through the file tree
 ## reading/importing of the CT scans
 
+counter = 0
+
 patientUIDs = []
 with DICOMUtils.TemporaryDICOMDatabase() as db:
     slicer.util.selectModule("DICOM")
@@ -44,10 +46,10 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         params = {
         "patientVolume": volumes[0].GetID(),
         "patientOutputVolume": slicer.mrmlScene.AddNewNodeByClass(
-            "vtkMRMLScalarVolumeNode", "BrainOnly"
+            "vtkMRMLScalarVolumeNode", "BrainOnly" + str(counter)
         ),
         "patientMaskLabel": slicer.mrmlScene.AddNewNodeByClass(
-            "vtkMRMLLabelMapVolumeNode", "BrainMask"
+            "vtkMRMLLabelMapVolumeNode", "BrainMask" + str(counter)
         ),
         }
         cliNode = slicer.cli.runSync(
@@ -58,8 +60,9 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
 
 
 ## segmentation
-        brainVolume = slicer.util.getNode("BrainOnly")
-        segNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "Segmentation")
+        brainVolume = slicer.util.getNode("BrainOnly" + str(counter))
+        segNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", "Segmentation" + str(counter))
+        counter = counter + 1
         segNode.CreateDefaultDisplayNodes()
         segNode.SetReferenceImageGeometryParameterFromVolumeNode(brainVolume)
 
@@ -73,7 +76,7 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         segmentEditorWidget.setMasterVolumeNode(brainVolume)
 
         # Add a segment
-        segNode.GetSegmentation().AddEmptySegment("ThresholdSeg")
+        segNode.GetSegmentation().AddEmptySegment("ThresholdSeg" + str(counter))
 
         # Apply threshold
         segmentEditorWidget.setActiveEffectByName("Threshold")
@@ -81,6 +84,14 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
 
         effect.setParameter("MinimumThreshold", "1")   # <-- choose your HU range
         effect.setParameter("MaximumThreshold", "46")    # <-- choose your HU range
+        effect.self().onApply()
+
+        # Apply smoothing
+        segmentEditorWidget.setActiveEffectByName("Smoothing")
+        effect = segmentEditorWidget.activeEffect()
+
+        effect.setParameter("SmoothingMethod", "MORPHOLOGICAL_CLOSING")
+        effect.setParameter("KernelSizeMm", "4")  # <-- 4 mm smoothing
         effect.self().onApply()
 
    
