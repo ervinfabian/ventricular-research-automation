@@ -6,28 +6,48 @@ import ctk
 from DICOMLib import DICOMUtils
 import time
 import SegmentStatistics
+from datetime import datetime, timezone
+import gspread
+from google.oauth2.service_account import Credentials
+
+
+## google sheet access
+SERVICE_ACCOUNT_JSON = "service_account.json"
+SPREADSHEET_ID = "1VXfUrSS3qPuWkplbNVOstrAWffUUlibHoNcKlxBQLuE"
+WORKSHEET_NAME = "Ventricle-data"
+
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+def get_ws():
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_JSON, scopes=SCOPES)
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    return sh.worksheet(WORKSHEET_NAME)
+
+def append_case(case_id: str, sex: str, age: int, brain_volume: float):
+    ws = get_ws()
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    ws.append_row([case_id, sex, age, brain_volume, ts], value_input_option="USER_ENTERED")
+
 
 ## iteration through the file tree
 ## reading/importing of the CT scans
-linux_path = "/home/ervin/Documents/kutatas/ventricular-research-automation/data/"
-macos_path = "/Users/ervin/Documents/kutatas/data/"
+linux_path = "/home/ervin/Documents/kutatas/ventricular-research-automation/anonym_data/"
+macos_path = "/Users/ervin/Documents/kutatas/anonym_data/"
 counter = 0
 
 patientUIDs = []
+
 with DICOMUtils.TemporaryDICOMDatabase() as db:
     slicer.util.selectModule("DICOM")
     dicomBrowser = slicer.modules.DICOMWidget.browserWidget.dicomBrowser
     for i in os.listdir(linux_path):
-        if not i.startswith('.'):
-            for k in os.listdir(linux_path + i + "/"):
-                if not k.startswith('.'):
-                    for l in os.listdir(linux_path + i + "/" + k + "/"):
-                        if not l.startswith('.'):
-                            if not os.path.isdir(linux_path + i + "/" + k + "/" + l + "/"):
-                                raise ValueError("Not a folder: " + linux_path + i + "/" + k + "/" + l + "/")
-                            dicomBrowser.importDirectory(linux_path + i + "/" + k + "/" + l + "/", dicomBrowser.ImportDirectoryAddLink)
-                            dicomBrowser.waitForImportFinished()                       
-                            print(db.patients()[-1])
+            dicomBrowser.importDirectory(linux_path + i + "/", dicomBrowser.ImportDirectoryAddLink)
+            dicomBrowser.waitForImportFinished()                       
+            print(db.patients()[-1])
 
 ## loading into nodes                     
     patientUIDs = db.patients() 
@@ -89,12 +109,12 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         effect.self().onApply()
 
         # Apply smoothing
-        # segmentEditorWidget.setActiveEffectByName("Smoothing")
-        # effect = segmentEditorWidget.activeEffect()
+        segmentEditorWidget.setActiveEffectByName("Smoothing")
+        effect = segmentEditorWidget.activeEffect()
 
-        # effect.setParameter("SmoothingMethod", "MORPHOLOGICAL_CLOSING")
-        # effect.setParameter("KernelSizeMm", "4")  # <-- 4 mm smoothing
-        # effect.self().onApply()
+        effect.setParameter("SmoothingMethod", "MORPHOLOGICAL_CLOSING")
+        effect.setParameter("KernelSizeMm", "4")  # <-- 4 mm smoothing
+        effect.self().onApply()
 
         # masking outside
         maskLabel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "MaskLabel")
@@ -127,6 +147,7 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
 
         brain_volume = stats[(segId, "LabelmapSegmentStatisticsPlugin.volume_mm3")] ## the calculated brain volume
         print(brain_volume/1000)
+        append_case(patientUID, "F", 49, brain_volume)
 
         counter = counter + 1
 

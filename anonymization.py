@@ -4,8 +4,6 @@ import pydicom
 from pathlib import Path
 
 
-
-
 # Keep these (you said you need them)
 KEEP_TAGS = {
     "PatientAge",
@@ -60,7 +58,7 @@ def _get_series_key(ds) -> tuple[str, str] | None:
     return (str(ds.StudyInstanceUID), str(ds.SeriesInstanceUID))
 
 
-def anonymize_dicom(in_path: Path, out_path: Path) -> bool:
+def anonymize_dicom(in_path: Path, out_path: Path, counter: int) -> bool:
     """
     Returns True if file was anonymized & written, False if skipped (not DICOM or read error).
     """
@@ -119,30 +117,36 @@ def anonymize_dicom(in_path: Path, out_path: Path) -> bool:
     # (Optional but common) Replace PatientName with ANON rather than blank
     if "PatientName" in ds:
         ds.PatientName = "ANONYM"
+    
+    if "PatientID" in ds:
+        ds.PatientID = str(counter)
 
     # Ensure output directory exists and write
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ds.save_as(str(out_path))
+    # print(ds.PatientAge)
+    # print(ds.PatientName)
+    # print(ds.PatientSex)
+
     return True
 
 def anonymize_tree(input_root: Path, output_root: Path) -> None:
     input_root = input_root.resolve()
     output_root = output_root.resolve()
 
-
-
     total = 0
     written = 0
     skipped = 0
-    count = 0
+    count = 1
     
-
+    counter = 0
     for dirpath, _, filenames in os.walk(input_root):
         dirpath_p = Path(dirpath)
-        counter = 0
+        
 
-        if count == 4:
+        if count % 4 == 0:
             rel_dir = Path("case" + str(counter))
+            print(counter)
             file_counter = 0
             for fn in filenames:
                 filename = "file" + str(file_counter)
@@ -151,7 +155,7 @@ def anonymize_tree(input_root: Path, output_root: Path) -> None:
 
                 # Mirror the directory structure under output_root
                 out_file = output_root / rel_dir / filename
-                ok = anonymize_dicom(in_file, out_file)
+                ok = anonymize_dicom(in_file, out_file, counter)
                 if ok:
                     written += 1       
                 else:
@@ -161,8 +165,6 @@ def anonymize_tree(input_root: Path, output_root: Path) -> None:
             counter = counter + 1
 
         count = count + 1
-        
-
 
     print(f"Done. Total files seen: {total}")
     print(f"Anonymized & written: {written}")
