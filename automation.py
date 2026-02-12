@@ -9,22 +9,23 @@ import SegmentStatistics
 
 ## iteration through the file tree
 ## reading/importing of the CT scans
-
+linux_path = "/home/ervin/Documents/kutatas/ventricular-research-automation/data/"
+macos_path = "/Users/ervin/Documents/kutatas/data/"
 counter = 0
 
 patientUIDs = []
 with DICOMUtils.TemporaryDICOMDatabase() as db:
     slicer.util.selectModule("DICOM")
     dicomBrowser = slicer.modules.DICOMWidget.browserWidget.dicomBrowser
-    for i in os.listdir("/Users/ervin/Documents/kutatas/data/"):
+    for i in os.listdir(linux_path):
         if not i.startswith('.'):
-            for k in os.listdir("/Users/ervin/Documents/kutatas/data/" + i + "/"):
+            for k in os.listdir(linux_path + i + "/"):
                 if not k.startswith('.'):
-                    for l in os.listdir("/Users/ervin/Documents/kutatas/data/" + i + "/" + k + "/"):
+                    for l in os.listdir(linux_path + i + "/" + k + "/"):
                         if not l.startswith('.'):
-                            if not os.path.isdir("/Users/ervin/Documents/kutatas/data/" + i + "/" + k + "/" + l + "/"):
-                                raise ValueError("Not a folder: " + "/Users/ervin/Documents/kutatas/data/" + i + "/" + k + "/" + l + "/")
-                            dicomBrowser.importDirectory("/Users/ervin/Documents/kutatas/data/" + i + "/" + k + "/" + l + "/", dicomBrowser.ImportDirectoryAddLink)
+                            if not os.path.isdir(linux_path + i + "/" + k + "/" + l + "/"):
+                                raise ValueError("Not a folder: " + linux_path + i + "/" + k + "/" + l + "/")
+                            dicomBrowser.importDirectory(linux_path + i + "/" + k + "/" + l + "/", dicomBrowser.ImportDirectoryAddLink)
                             dicomBrowser.waitForImportFinished()                       
                             print(db.patients()[-1])
 
@@ -88,12 +89,12 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         effect.self().onApply()
 
         # Apply smoothing
-        segmentEditorWidget.setActiveEffectByName("Smoothing")
-        effect = segmentEditorWidget.activeEffect()
+        # segmentEditorWidget.setActiveEffectByName("Smoothing")
+        # effect = segmentEditorWidget.activeEffect()
 
-        effect.setParameter("SmoothingMethod", "MORPHOLOGICAL_CLOSING")
-        effect.setParameter("KernelSizeMm", "4")  # <-- 4 mm smoothing
-        effect.self().onApply()
+        # effect.setParameter("SmoothingMethod", "MORPHOLOGICAL_CLOSING")
+        # effect.setParameter("KernelSizeMm", "4")  # <-- 4 mm smoothing
+        # effect.self().onApply()
 
         # masking outside
         maskLabel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "MaskLabel")
