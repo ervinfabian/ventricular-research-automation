@@ -142,9 +142,8 @@ def anonymize_tree(input_root: Path, output_root: Path) -> None:
     counter = 0
     for dirpath, _, filenames in os.walk(input_root):
         dirpath_p = Path(dirpath)
-        
 
-        if count % 4 == 0:
+        if dirpath.__contains__("SE"):
             rel_dir = Path("case" + str(counter))
             print(counter)
             file_counter = 0

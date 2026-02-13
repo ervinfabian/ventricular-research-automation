@@ -12,7 +12,7 @@ from google.oauth2.service_account import Credentials
 
 
 ## google sheet access
-SERVICE_ACCOUNT_JSON = "service_account.json"
+SERVICE_ACCOUNT_JSON = "/home/ervin/Documents/kutatas/ventricular-research-automation/brain-ventricles-study-7b0925fa71d3.json"
 SPREADSHEET_ID = "1VXfUrSS3qPuWkplbNVOstrAWffUUlibHoNcKlxBQLuE"
 WORKSHEET_NAME = "Ventricle-data"
 
@@ -21,11 +21,41 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+def get_age_sex_from_patient(patient_uid: str):
+    db = slicer.dicomDatabase
+
+    studies = db.studiesForPatient(patient_uid)
+    if not studies:
+        return None, None
+
+    series = db.seriesForStudy(studies[0])
+    if not series:
+        return None, None
+
+    instances = db.instancesForSeries(series[0])
+    if not instances:
+        return None, None
+
+    sop_uid = instances[0]
+
+    age = db.instanceValue(sop_uid, "0010,1010")  # PatientAge
+    sex = db.instanceValue(sop_uid, "0010,0040")  # PatientSex
+
+    # optional: convert age to integer years
+    age_years = None
+    if age and age.endswith("Y"):
+        try:
+            age_years = int(age[:3])
+        except Exception:
+            pass
+
+    return age_years, sex
+
 def get_ws():
     creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_JSON, scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SPREADSHEET_ID)
-    return sh.worksheet(WORKSHEET_NAME)
+    return sh.get_worksheet(0)
 
 def append_case(case_id: str, sex: str, age: int, brain_volume: float):
     ws = get_ws()
@@ -146,8 +176,8 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         stats = logic.getStatistics()
 
         brain_volume = stats[(segId, "LabelmapSegmentStatisticsPlugin.volume_mm3")] ## the calculated brain volume
-        print(brain_volume/1000)
-        append_case(patientUID, "F", 49, brain_volume)
+        age, sex = get_age_sex_from_patient(patientUID)
+        append_case(patientUID, sex, age, brain_volume)
 
         counter = counter + 1
 
