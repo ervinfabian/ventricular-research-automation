@@ -12,7 +12,8 @@ from google.oauth2.service_account import Credentials
 
 
 ## google sheet access
-SERVICE_ACCOUNT_JSON = "/home/ervin/Documents/kutatas/ventricular-research-automation/brain-ventricles-study-7b0925fa71d3.json"
+SERVICE_ACCOUNT_JSON_LINUX = "/home/ervin/Documents/kutatas/ventricular-research-automation/brain-ventricles-study-7b0925fa71d3.json"
+SERVICE_ACCOUNT_JSON_MACOS = "/Users/ervin/Documents/kutatas/brain-ventricles-study-7b0925fa71d3.json"
 SPREADSHEET_ID = "1VXfUrSS3qPuWkplbNVOstrAWffUUlibHoNcKlxBQLuE"
 WORKSHEET_NAME = "Ventricle-data"
 
@@ -52,7 +53,7 @@ def get_age_sex_from_patient(patient_uid: str):
     return age_years, sex
 
 def get_ws():
-    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_JSON, scopes=SCOPES)
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_JSON_MACOS, scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SPREADSHEET_ID)
     return sh.get_worksheet(0)
@@ -74,9 +75,11 @@ patientUIDs = []
 with DICOMUtils.TemporaryDICOMDatabase() as db:
     slicer.util.selectModule("DICOM")
     dicomBrowser = slicer.modules.DICOMWidget.browserWidget.dicomBrowser
-    for i in os.listdir(linux_path):
-            dicomBrowser.importDirectory(linux_path + i + "/", dicomBrowser.ImportDirectoryAddLink)
-            dicomBrowser.waitForImportFinished()                       
+    for i in os.listdir(macos_path):
+        if not i.startswith('.'):
+            dicomBrowser.importDirectory(macos_path + i + "/", dicomBrowser.ImportDirectoryAddLink)
+            dicomBrowser.waitForImportFinished()
+            print(i)
             print(db.patients()[-1])
 
 ## loading into nodes                     
