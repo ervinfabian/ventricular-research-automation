@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import os
 import pathlib
 import slicer
@@ -10,83 +9,15 @@ import SegmentStatistics
 from datetime import datetime, timezone
 import gspread
 from google.oauth2.service_account import Credentials
-import subprocess
+import numpy as np
 
-
-# === nnU-Net local folders ===
 NNUNET_INFER_ROOT = os.path.expanduser("/Users/ervin/Documents/kutatas/")  # temp working dir
 NNUNET_INPUT_DIR = os.path.join(NNUNET_INFER_ROOT, "input")
 NNUNET_OUTPUT_DIR = os.path.join(NNUNET_INFER_ROOT, "output")
-NNUNET_PREDICT_BIN = "/Users/ervin/venvs/nnunet/bin/nnUNetv2_predict"
 
-# os.environ["nnUNet_raw"] = os.path.expanduser("~/nnUNet_raw")
-# os.environ["nnUNet_preprocessed"] = os.path.expanduser("~/nnUNet_preprocessed")
-# os.environ["nnUNet_results"] = os.path.expanduser("~/nnUNet_results")
 
-os.makedirs(NNUNET_INPUT_DIR, exist_ok=True)
-os.makedirs(NNUNET_OUTPUT_DIR, exist_ok=True)
-
-### ventricle segmentation assistance funcitons
 def export_volume_to_nifti(volume_node, out_path_nii_gz: str):
     slicer.util.saveNode(volume_node, out_path_nii_gz)
-
-def run_nnunet_predict_single_case(case_id: str):
-    """
-    Runs nnUNetv2_predict on a single NIfTI file prepared in NNUNET_INPUT_DIR.
-    model_folder = path to your trained model
-    """
-    input_file = os.path.join(NNUNET_INPUT_DIR, f"{case_id}_0000.nii.gz")
-    output_file = os.path.join(NNUNET_OUTPUT_DIR, f"{case_id}.nii.gz")
-
-    cmd = [
-        NNUNET_PREDICT_BIN,
-        "-i", NNUNET_INPUT_DIR,
-        "-o", NNUNET_OUTPUT_DIR,
-        "-d", "701",
-        "-c", "3d_fullres",
-        "-f", "0"
-        "-tr", "nnUNetTrainer_20epochs"
-        "-p" "nnUNetPlans"
-    ]
-
-    subprocess.run(cmd, check=True)
-
-    if not os.path.exists(output_file):
-        raise RuntimeError(f"Prediction missing: {output_file}")
-
-    return output_file
-
-def load_labelmap_as_segmentation(labelmap_path: str, reference_volume_node, seg_name: str):
-    labelmap_node = slicer.util.loadVolume(labelmap_path)
-
-    seg_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLSegmentationNode", seg_name)
-    seg_node.CreateDefaultDisplayNodes()
-    seg_node.SetReferenceImageGeometryParameterFromVolumeNode(reference_volume_node)
-
-    slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(
-        labelmap_node, seg_node
-    )
-
-    return seg_node
-
-def compute_total_segmentation_volume_mm3(segmentation_node):
-    logic = SegmentStatistics.SegmentStatisticsLogic()
-    paramNode = logic.getParameterNode()
-    paramNode.SetParameter("Segmentation", segmentation_node.GetID())
-    paramNode.SetParameter("LabelmapSegmentStatisticsPlugin.enabled", "True")
-    logic.computeStatistics()
-    stats = logic.getStatistics()
-
-    seg = segmentation_node.GetSegmentation()
-    total = 0.0
-    for i in range(seg.GetNumberOfSegments()):
-        seg_id = seg.GetNthSegmentID(i)
-        key = (seg_id, "LabelmapSegmentStatisticsPlugin.volume_mm3")
-        if key in stats:
-            total += float(stats[key])
-    return total
-
-
 
 ## google sheet access
 SERVICE_ACCOUNT_JSON_LINUX = "/home/ervin/Documents/kutatas/ventricular-research-automation/brain-ventricles-study-7b0925fa71d3.json"
@@ -135,24 +66,17 @@ def get_ws():
     sh = gc.open_by_key(SPREADSHEET_ID)
     return sh.get_worksheet(0)
 
-# def append_case(case_id: str, sex: str, age: int, brain_volume: float):
-#     ws = get_ws()
-#     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
-#     ws.append_row([case_id, sex, age, brain_volume, ts], value_input_option="USER_ENTERED")
-
-def append_case(case_id: str, sex: str, age: int, brain_volume: float, ventricles_volume: float):
+def append_case(case_id: str, sex: str, age: int, brain_volume: float):
     ws = get_ws()
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    ratio = ventricles_volume / brain_volume if brain_volume else ""
-    ws.append_row([case_id, sex, age, brain_volume, ventricles_volume, ratio, ts],
-                  value_input_option="USER_ENTERED")
+    ws.append_row([case_id, sex, age, brain_volume, ts], value_input_option="USER_ENTERED")
 
 
 ## iteration through the file tree
 ## reading/importing of the CT scans
 linux_path = "/home/ervin/Documents/kutatas/ventricular-research-automation/anonym_data/"
 macos_path = "/Users/ervin/Documents/kutatas/anonym_data/"
-counter = 0
+counter = 62
 
 patientUIDs = []
 
@@ -230,28 +154,60 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         effect = segmentEditorWidget.activeEffect()
 
         effect.setParameter("SmoothingMethod", "MORPHOLOGICAL_CLOSING")
-        effect.setParameter("KernelSizeMm", "4")  # <-- 4 mm smoothing
+        effect.setParameter("KernelSizeMm", "1.5")  # <-- 4 mm smoothing
         effect.self().onApply()
 
         # masking outside
-        maskLabel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "MaskLabel")
+        
+        labelmapNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "ValidationMask")
+        slicer.modules.segmentations.logic().ExportSegmentsToLabelmapNode(segNode, [segId], labelmapNode, volumes[0])
 
-        slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(
-        segNode, maskLabel, brainVolume
-        )
+        ctArray = slicer.util.arrayFromVolume(volumes[0])
+        maskArray = slicer.util.arrayFromVolume(labelmapNode)
+        import scipy.ndimage
+        # This fills any 0-value holes inside your 1-value segment
+        maskArray[:] = scipy.ndimage.binary_fill_holes(maskArray)
+
+        resultArray = np.copy(ctArray).astype(np.float32)
+        
+        resultArray[maskArray == 0] = -10000.0
 
         theBrain = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "TheBrain" + str(counter))  ## it will be the volume of the segmented Brain
+        slicer.util.updateVolumeFromArray(theBrain, resultArray)
 
-        params = {
-            "InputVolume": brainVolume.GetID(),
-            "MaskVolume": maskLabel.GetID(),
-            "OutputVolume": theBrain.GetID(),
-            "FillValue": -10000,
-        }
+        theBrain.SetOrigin(volumes[0].GetOrigin())
+        theBrain.SetSpacing(volumes[0].GetSpacing())
+        ijkToRas = vtk.vtkMatrix4x4()
+        volumes[0].GetIJKToRASMatrix(ijkToRas)
+        theBrain.SetIJKToRASMatrix(ijkToRas)
 
-        cliNode = slicer.cli.runSync(slicer.modules.maskscalarvolume, None, params)
-        print(cliNode.GetStatusString())
-        print(cliNode.GetErrorText())
+        # 1. Get the display node of your new volume
+        # displayNode = theBrain.GetScalarVolumeDisplayNode()
+
+        # # 2. Set the 'Window' and 'Level' to CT Brain standards
+        # # Level 40 is the center of brain tissue; Window 80 shows the contrast
+        # displayNode.SetAutoWindowLevel(False)
+        # displayNode.SetWindow(80)
+        # displayNode.SetLevel(40)
+
+        # maskLabel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLLabelMapVolumeNode", "TempLabelMap")
+        # slicer.modules.segmentations.logic().ExportVisibleSegmentsToLabelmapNode(segNode, maskLabel, signedVol)
+
+        # theBrain = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLScalarVolumeNode", "TheBrain" + str(counter))  ## it will be the volume of the segmented Brain
+        # params = {
+        #     "InputVolume": signedVol.GetID(),
+        #     "MaskVolume": maskLabel.GetID(),
+        #     "OutputVolume": theBrain.GetID(),
+        #     "MaskValue": 5,         # Labelmaps exported from segments usually use 1
+        #     "FillValue": -1000,         # Areas outside the segment will be 0 (black)
+        #     "Operation": "Original" # Keeps original intensities inside the mask
+        # }
+
+        # cliNode = slicer.cli.runSync(slicer.modules.maskscalarvolume, None, params)
+        # print(cliNode.GetStatusString())
+        # print(cliNode.GetErrorText())
+
+        # Apply threshold
 
         # run Segment Statistics
         logic = SegmentStatistics.SegmentStatisticsLogic()
@@ -260,65 +216,17 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         paramNode.SetParameter("ScalarVolume", theBrain.GetID())
         logic.computeStatistics()
 
-        stats = logic.getStatistics()
+        case_id = f"case_{counter}"
+        input_path = os.path.join(NNUNET_INPUT_DIR, f"{case_id}_0000.nii.gz")
+
+        export_volume_to_nifti(theBrain, input_path)
+
+        # stats = logic.getStatistics()
 
         # brain_volume = stats[(segId, "LabelmapSegmentStatisticsPlugin.volume_mm3")] ## the calculated brain volume
         # age, sex = get_age_sex_from_patient(patientUID)
         # append_case(patientUID, sex, age, brain_volume)
 
-        # counter = counter + 1
-
-        brain_volume = float(stats[(segId, "LabelmapSegmentStatisticsPlugin.volume_mm3")])
-
-        # ===============================
-        # nnU-Net ventricles prediction
-        # ===============================
-
-        case_id = f"case_{counter}"
-
-        # clean input/output folders
-        # for f in os.listdir(NNUNET_INPUT_DIR):
-        #     os.remove(os.path.join(NNUNET_INPUT_DIR, f))
-        # for f in os.listdir(NNUNET_OUTPUT_DIR):
-        #     os.remove(os.path.join(NNUNET_OUTPUT_DIR, f))
-        for f in os.listdir(NNUNET_INPUT_DIR):
-            p = os.path.join(NNUNET_INPUT_DIR, f)
-            if os.path.isfile(p):
-                os.remove(p)
-
-        for f in os.listdir(NNUNET_OUTPUT_DIR):
-            p = os.path.join(NNUNET_OUTPUT_DIR, f)
-            if os.path.isfile(p):
-                os.remove(p)
-
-        # nnU-Net expects *_0000.nii.gz
-        input_path = os.path.join(NNUNET_INPUT_DIR, f"{case_id}_0000.nii.gz")
-
-        # IMPORTANT: choose correct source volume
-        # If your model trained on full CT → use volumes[0]
-        # If trained on skull-stripped → use brainVolume
-        # If trained on masked brain → use theBrain
-
-        export_volume_to_nifti(theBrain, input_path)
-
-        # run prediction
-        pred_path = run_nnunet_predict_single_case(case_id)
-
-        # load segmentation
-        vent_seg_node = load_labelmap_as_segmentation(
-            pred_path,
-            theBrain,
-            f"VentriclesSeg_{counter}"
-        )
-
-        # # compute ventricles volume
-        ventricles_volume = compute_total_segmentation_volume_mm3(vent_seg_node)
-
-        # # upload BOTH volumes
-        # age, sex = get_age_sex_from_patient(patientUID)
-        # append_case(patientUID, sex, age, brain_volume, ventricles_volume)
-        print(ventricles_volume)
-        counter += 1
-
+        counter = counter + 1
 
    
