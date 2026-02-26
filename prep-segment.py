@@ -22,8 +22,8 @@ def export_volume_to_nifti(volume_node, out_path_nii_gz: str):
 ## google sheet access
 SERVICE_ACCOUNT_JSON_LINUX = "/home/ervin/Documents/kutatas/ventricular-research-automation/brain-ventricles-study-7b0925fa71d3.json"
 SERVICE_ACCOUNT_JSON_MACOS = "/Users/ervin/Documents/kutatas/brain-ventricles-study-7b0925fa71d3.json"
-SPREADSHEET_ID = "1VXfUrSS3qPuWkplbNVOstrAWffUUlibHoNcKlxBQLuE"
-WORKSHEET_NAME = "Original-data"
+SPREADSHEET_ID = "1QgTs9VB34ElI5OIzmArIeeIqe52_fFimQQGCY244JIA"
+WORKSHEET_NAME = "Segment-data"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -181,7 +181,6 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         volumes[0].GetIJKToRASMatrix(ijkToRas)
         theBrain.SetIJKToRASMatrix(ijkToRas)
 
-
         # run Segment Statistics
         logic = SegmentStatistics.SegmentStatisticsLogic()
         paramNode = logic.getParameterNode()
@@ -194,11 +193,11 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
 
         export_volume_to_nifti(theBrain, input_path)
 
-        stats = logic.getStatistics()
+        # stats = logic.getStatistics()
 
-        brain_volume = stats[(segId, "LabelmapSegmentStatisticsPlugin.volume_mm3")] ## the calculated brain volume
-        age, sex = get_age_sex_from_patient(patientUID)
-        append_case(patientUID, sex, age, brain_volume)
+        # brain_volume = stats[(segId, "LabelmapSegmentStatisticsPlugin.volume_mm3")] ## the calculated brain volume
+        # age, sex = get_age_sex_from_patient(patientUID)
+        # append_case(patientUID, sex, age, brain_volume)
 
         counter = counter + 1
 
