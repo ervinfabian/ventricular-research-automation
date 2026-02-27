@@ -10,8 +10,10 @@ from datetime import datetime, timezone
 import gspread
 from google.oauth2.service_account import Credentials
 import numpy as np
+import nibabel as nib
+import vtk.util.numpy_support as vtk_np
 
-NNUNET_INFER_ROOT = os.path.expanduser("/Users/ervin/Documents/kutatas/")  # temp working dir
+NNUNET_INFER_ROOT = os.path.expanduser("/home/ervin/Documents/kutatas/ventricular-research-automation/")  # temp working dir
 NNUNET_INPUT_DIR = os.path.join(NNUNET_INFER_ROOT, "input")
 NNUNET_OUTPUT_DIR = os.path.join(NNUNET_INFER_ROOT, "output")
 
@@ -24,6 +26,7 @@ SERVICE_ACCOUNT_JSON_LINUX = "/home/ervin/Documents/kutatas/ventricular-research
 SERVICE_ACCOUNT_JSON_MACOS = "/Users/ervin/Documents/kutatas/brain-ventricles-study-7b0925fa71d3.json"
 SPREADSHEET_ID = "1VXfUrSS3qPuWkplbNVOstrAWffUUlibHoNcKlxBQLuE"
 WORKSHEET_NAME = "Original-data"
+
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -61,15 +64,55 @@ def get_age_sex_from_patient(patient_uid: str):
     return age_years, sex
 
 def get_ws():
-    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_JSON_MACOS, scopes=SCOPES)
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_JSON_LINUX, scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SPREADSHEET_ID)
     return sh.get_worksheet(0)
 
-def append_case(case_id: str, sex: str, age: int, brain_volume: float):
+def append_case(case_id: str, sex: str, age: int, brain_volume: float, width: float, slice: int):
     ws = get_ws()
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    ws.append_row([case_id, sex, age, brain_volume, ts], value_input_option="USER_ENTERED")
+    ws.append_row([case_id, sex, age, brain_volume, width, slice, ts], value_input_option="USER_ENTERED")
+
+
+def get_slicer_max_skull_width(volume_input):
+    # Ellenőrizzük, hogy a bemenet szöveg-e vagy már egy objektum
+    if isinstance(volume_input, str):
+        volume_node = slicer.util.getNode(volume_input)
+    else:
+        volume_node = volume_input
+
+    if not volume_node:
+        print("Hiba: A megadott kötet nem található!")
+        return
+
+    # Adatok kinyerése
+    data = slicer.util.arrayFromVolume(volume_node)
+    spacing = volume_node.GetSpacing()
+    
+    max_width_mm = 0
+    best_slice = 0
+
+    # Pásztázás az axiális szeleteken
+    for z in range(data.shape[0]):
+        slice_2d = data[z, :, :]
+        coords = np.argwhere(slice_2d > 0)
+        
+        if coords.size > 0:
+            # Slicer/Numpy tengelyek: data[Z, Y, X] -> coords[:, 1] az X (szélesség)
+            width_pixels = np.max(coords[:, 1]) - np.min(coords[:, 1])
+            width_mm = width_pixels * spacing[0]
+            
+            if width_mm > max_width_mm:
+                max_width_mm = width_mm
+                best_slice = z
+
+    # print(f"--- Eredmény ---")
+    # print(f"Kötet neve: {volume_node.GetName()}")
+    # print(f"Maximális koponya szélesség: {max_width_mm:.2f} mm")
+    # print(f"Szelet index: {best_slice}")
+    
+    return max_width_mm, best_slice
 
 
 ## iteration through the file tree
@@ -83,9 +126,9 @@ patientUIDs = []
 with DICOMUtils.TemporaryDICOMDatabase() as db:
     slicer.util.selectModule("DICOM")
     dicomBrowser = slicer.modules.DICOMWidget.browserWidget.dicomBrowser
-    for i in os.listdir(macos_path):
+    for i in os.listdir(linux_path):
         if not i.startswith('.'):
-            dicomBrowser.importDirectory(macos_path + i + "/", dicomBrowser.ImportDirectoryAddLink)
+            dicomBrowser.importDirectory(linux_path + i + "/", dicomBrowser.ImportDirectoryAddLink)
             dicomBrowser.waitForImportFinished()
             print(i)
             print(db.patients()[-1])
@@ -198,7 +241,9 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
 
         brain_volume = stats[(segId, "LabelmapSegmentStatisticsPlugin.volume_mm3")] ## the calculated brain volume
         age, sex = get_age_sex_from_patient(patientUID)
-        append_case(patientUID, sex, age, brain_volume)
+        needed_width = get_slicer_max_skull_width(theBrain)
+        print(needed_width)
+        append_case(patientUID, sex, age, brain_volume, needed_width[0], needed_width[1])
 
         counter = counter + 1
 
