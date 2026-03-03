@@ -4,6 +4,8 @@ import os
 import gspread
 from datetime import datetime, timezone
 from oauth2client.service_account import ServiceAccountCredentials
+import scipy.ndimage as ndi
+
 
 # --- GOOGLE SHEETS SETUP ---
 def get_ws():
@@ -12,7 +14,7 @@ def get_ws():
     creds = ServiceAccountCredentials.from_json_keyfile_name("/Users/ervin/Documents/kutatas/brain-ventricles-study-7b0925fa71d3.json", scope)
     client = gspread.authorize(creds)
     # Cseréld ki a saját táblázatod nevére!
-    return client.open("Segment-data2").sheet1 
+    return client.open("Segment-data3").sheet1 
 
 def append_case(case_id, frontal_horn_width, skull_width, evans_index, 
                 v_brain, v_lateral, v_3rd, v_4th, v_subarch, slice_idx):
@@ -35,10 +37,66 @@ def append_case(case_id, frontal_horn_width, skull_width, evans_index,
     ]
     ws.append_row(row, value_input_option="USER_ENTERED")
 
-# --- FELDOLGOZÓ FÜGGVÉNY ---
+def get_two_largest_components(mask):
+    labeled, num = ndi.label(mask)
+    if num == 0:
+        return mask
+
+    sizes = ndi.sum(mask, labeled, range(1, num + 1))
+    largest_labels = np.argsort(sizes)[-2:] + 1
+    return np.isin(labeled, largest_labels)
+
+
+def compute_slice_width(mask2d, pixdim_x):
+    coords = np.argwhere(mask2d)
+    if coords.size == 0:
+        return 0.0
+    return (coords[:, 0].max() - coords[:, 0].min()) * pixdim_x
+
+
+def robust_evans_width(data, dims, pixdim, y_frac, z_frac):
+    """Top-k medián alapú Evans szélesség keresés."""
+    widths = []
+    zs = []
+
+    y_limit = int(dims[1] * y_frac)
+    z_start = int(dims[2] * z_frac)
+
+    vent_mask = (data == 2)
+
+    # morfológiai tisztítás
+    vent_mask = ndi.binary_opening(vent_mask, iterations=1)
+    vent_mask = ndi.binary_closing(vent_mask, iterations=1)
+
+    # csak a 2 legnagyobb komponens
+    vent_mask = get_two_largest_components(vent_mask)
+
+    # anterior maszk
+    vent_mask[:, y_limit:, :] = False
+
+    for z in range(z_start, dims[2]):
+        w = compute_slice_width(vent_mask[:, :, z], pixdim[0])
+        if w > 0:
+            widths.append(w)
+            zs.append(z)
+
+    if len(widths) == 0:
+        return 0.0, -1
+
+    # top-k medián (stabil)
+    widths = np.array(widths)
+    zs = np.array(zs)
+
+    k = min(5, len(widths))
+    idx = np.argsort(widths)[-k:]
+    best_width = float(np.median(widths[idx]))
+    best_z = int(zs[idx[-1]])
+
+    return best_width, best_z
+
 def process_all_scans(input_folder):
     files = [f for f in os.listdir(input_folder) if f.endswith('.nii.gz')]
-    
+
     for filename in files:
         path = os.path.join(input_folder, filename)
         try:
@@ -60,64 +118,33 @@ def process_all_scans(input_folder):
             v_subarch = round(np.sum(data == 5) * voxel_vol_cm3, 3)
 
             # ================================
-            # 2. EVANS INDEX – ROBUSZTUS MÉRÉS
+            # 2. EVANS MÉRÉS (progresszív)
             # ================================
-            def search_width(y_frac, z_frac):
-                """Visszaadja a legjobb szélességet és szeletet."""
-                widths = []
-                best_z = -1
-                best_w = 0
+            max_v_w, opt_z = robust_evans_width(
+                data, dims, pixdim,
+                y_frac=0.42,
+                z_frac=0.40
+            )
 
-                y_limit = int(dims[1] * y_frac)
-                z_start = int(dims[2] * z_frac)
-
-                for z in range(z_start, dims[2]):
-                    v_slice = data[:, :, z]
-                    mask = (v_slice == 2)
-
-                    if not np.any(mask):
-                        continue
-
-                    coords = np.argwhere(mask)
-                    frontal = coords[coords[:, 1] < y_limit]
-
-                    if frontal.size == 0:
-                        continue
-
-                    w = (np.max(frontal[:, 0]) - np.min(frontal[:, 0])) * pixdim[0]
-
-                    if w > 0:
-                        widths.append(w)
-                        if w > best_w:
-                            best_w = w
-                            best_z = z
-
-                # --- medián stabilizálás (top-5) ---
-                if len(widths) >= 3:
-                    widths_sorted = np.sort(widths)
-                    topk = widths_sorted[-5:]
-                    best_w = float(np.median(topk))
-
-                return best_w, best_z
-
-            # ---- 1. kör (szigorú) ----
-            max_v_w, opt_z = search_width(0.42, 0.40)
-
-            # ---- 2. kör ----
+            # fallback 2
             if max_v_w == 0:
-                max_v_w, opt_z = search_width(0.50, 0.40)
+                max_v_w, opt_z = robust_evans_width(
+                    data, dims, pixdim,
+                    y_frac=0.50,
+                    z_frac=0.40
+                )
 
             # ================================
             # 3. KOPONYA SZÉLESSÉG
             # ================================
-            s_width = 0
+            s_width = 0.0
             if opt_z != -1:
                 skull_mask = data[:, :, opt_z] > 0
                 if np.any(skull_mask):
-                    s_coords = np.argwhere(skull_mask)
-                    s_width = (np.max(s_coords[:, 0]) - np.min(s_coords[:, 0])) * pixdim[0]
+                    coords = np.argwhere(skull_mask)
+                    s_width = (coords[:, 0].max() - coords[:, 0].min()) * pixdim[0]
 
-            ei = (max_v_w / s_width) if s_width > 0 else 0
+            ei = (max_v_w / s_width) if s_width > 0 else 0.0
 
             # ================================
             # 4. HARMADIK FALLBACK (kicsi EI)
@@ -127,19 +154,22 @@ def process_all_scans(input_folder):
             if ei < 0.20:
                 quality_flag = "LOW_EI_FALLBACK"
 
-                max_v_w3, opt_z3 = search_width(0.60, 0.25)
+                max_v_w3, opt_z3 = robust_evans_width(
+                    data, dims, pixdim,
+                    y_frac=0.60,
+                    z_frac=0.25
+                )
 
                 if max_v_w3 > max_v_w and opt_z3 != -1:
                     max_v_w = max_v_w3
                     opt_z = opt_z3
 
-                    # skull újraszámolás
                     skull_mask = data[:, :, opt_z] > 0
                     if np.any(skull_mask):
-                        s_coords = np.argwhere(skull_mask)
-                        s_width = (np.max(s_coords[:, 0]) - np.min(s_coords[:, 0])) * pixdim[0]
+                        coords = np.argwhere(skull_mask)
+                        s_width = (coords[:, 0].max() - coords[:, 0].min()) * pixdim[0]
 
-                    ei = (max_v_w / s_width) if s_width > 0 else 0
+                    ei = (max_v_w / s_width) if s_width > 0 else 0.0
 
             ei = round(ei, 4)
 
@@ -156,7 +186,7 @@ def process_all_scans(input_folder):
                 v_3rd=v_3rd,
                 v_4th=v_4th,
                 v_subarch=v_subarch,
-                slice_idx=opt_z,
+                slice_idx=opt_z
             )
 
             print(f"Sikeresen feltöltve: {case_id}")

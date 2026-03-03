@@ -13,7 +13,7 @@ import numpy as np
 import nibabel as nib
 import vtk.util.numpy_support as vtk_np
 
-NNUNET_INFER_ROOT = os.path.expanduser("/home/ervin/Documents/kutatas/ventricular-research-automation/")  # temp working dir
+NNUNET_INFER_ROOT = os.path.expanduser("/Users/ervin/Documents/kutatas/")  # temp working dir
 NNUNET_INPUT_DIR = os.path.join(NNUNET_INFER_ROOT, "input")
 NNUNET_OUTPUT_DIR = os.path.join(NNUNET_INFER_ROOT, "output")
 
@@ -64,7 +64,7 @@ def get_age_sex_from_patient(patient_uid: str):
     return age_years, sex
 
 def get_ws():
-    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_JSON_LINUX, scopes=SCOPES)
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_JSON_MACOS, scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SPREADSHEET_ID)
     return sh.get_worksheet(0)
@@ -118,17 +118,17 @@ def get_slicer_max_skull_width(volume_input):
 ## iteration through the file tree
 ## reading/importing of the CT scans
 linux_path = "/home/ervin/Documents/kutatas/ventricular-research-automation/anonym_data/"
-macos_path = "/Users/ervin/Documents/kutatas/anonym_data/"
-counter = 0
+macos_path = "/Users/ervin/Documents/kutatas/anonym_data/firstbatch/"
+counter = 200
 
 patientUIDs = []
 
 with DICOMUtils.TemporaryDICOMDatabase() as db:
     slicer.util.selectModule("DICOM")
     dicomBrowser = slicer.modules.DICOMWidget.browserWidget.dicomBrowser
-    for i in os.listdir(linux_path):
+    for i in os.listdir(macos_path):
         if not i.startswith('.'):
-            dicomBrowser.importDirectory(linux_path + i + "/", dicomBrowser.ImportDirectoryAddLink)
+            dicomBrowser.importDirectory(macos_path + i + "/", dicomBrowser.ImportDirectoryAddLink)
             dicomBrowser.waitForImportFinished()
             print(i)
             print(db.patients()[-1])
@@ -243,7 +243,7 @@ with DICOMUtils.TemporaryDICOMDatabase() as db:
         age, sex = get_age_sex_from_patient(patientUID)
         needed_width = get_slicer_max_skull_width(theBrain)
         print(needed_width)
-        append_case(patientUID, sex, age, brain_volume, needed_width[0], needed_width[1])
+        append_case(case_id, sex, age, brain_volume, needed_width[0], needed_width[1])
 
         counter = counter + 1
 

@@ -139,7 +139,7 @@ def anonymize_tree(input_root: Path, output_root: Path) -> None:
     skipped = 0
     count = 1
     
-    counter = 0
+    counter = 162
     for dirpath, _, filenames in os.walk(input_root):
         dirpath_p = Path(dirpath)
         if dirpath.__contains__("SE"):
@@ -171,8 +171,8 @@ def anonymize_tree(input_root: Path, output_root: Path) -> None:
 
 if __name__ == "__main__":
     # EDIT THESE TWO PATHS
-    INPUT_ROOT = Path("/home/ervin/Documents/kutatas/ventricular-research-automation/data/")     # e.g. "/home/you/raw_dicoms"
-    OUTPUT_ROOT = Path("/home/ervin/Documents/kutatas/ventricular-research-automation/anonym_data/")     # e.g. "/home/you/anon_dicoms"
+    INPUT_ROOT = Path("/Users/ervin/Documents/kutatas/data/")     # e.g. "/home/you/raw_dicoms"
+    OUTPUT_ROOT = Path("/Users/ervin/Documents/kutatas/anonym_data/")     # e.g. "/home/you/anon_dicoms"
     anonymize_tree(INPUT_ROOT, OUTPUT_ROOT)
     
     # print(INPUT_ROOT.resolve())
